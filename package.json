@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@copilot-extensions/preview-sdk": "^5.0.1",
+    "@octokit/auth-app": "^7.1.0",
     "@octokit/rest": "^21.0.0",
     "express": "^4.21.0"
   },

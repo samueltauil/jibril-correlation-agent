@@ -1,4 +1,5 @@
-import type { JibrilEvent, NormalizedEvent, EventType, RepoMapping } from "./types.js";
+import type { JibrilEvent, NormalizedEvent, EventType, RepoMapping, DetectedChain } from "./types.js";
+import { CorrelationEngine, type AlertCallback } from "./correlation.js";
 
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes
@@ -6,8 +7,10 @@ const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;  // 5 minutes
 export class EventStore {
   private events = new Map<string, NormalizedEvent>();
   private cleanupTimer: ReturnType<typeof setInterval>;
+  readonly correlationEngine: CorrelationEngine;
 
-  constructor(private ttlMs: number = DEFAULT_TTL_MS) {
+  constructor(private ttlMs: number = DEFAULT_TTL_MS, alertCallback?: AlertCallback) {
+    this.correlationEngine = new CorrelationEngine({ alertCallback });
     this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
   }
 
@@ -27,6 +30,14 @@ export class EventStore {
     };
 
     this.events.set(normalized.id, normalized);
+
+    // Feed into correlation engine for chain detection
+    const newChains = this.correlationEngine.onEvent(normalized);
+    if (newChains.length > 0) {
+      console.log(`[correlation] ${newChains.length} new chain(s) detected:`,
+        newChains.map(c => `${c.pattern.name} (confidence: ${c.confidence.toFixed(2)})`).join(", "));
+    }
+
     return normalized;
   }
 
@@ -61,6 +72,21 @@ export class EventStore {
     return results.slice(0, limit);
   }
 
+  /** Get detected attack chains */
+  getChains(options?: { minConfidence?: number; pattern?: string; scope?: string }): DetectedChain[] {
+    return this.correlationEngine.getChains(options);
+  }
+
+  /** Get a specific chain by ID */
+  getChain(id: string): DetectedChain | undefined {
+    return this.correlationEngine.getChain(id);
+  }
+
+  /** Get correlation statistics */
+  correlationStats() {
+    return this.correlationEngine.stats();
+  }
+
   /** Get summary stats */
   stats(): { total: number; bySeverity: Record<string, number>; byType: Record<string, number> } {
     const bySeverity: Record<string, number> = {};
@@ -87,6 +113,7 @@ export class EventStore {
 
   destroy(): void {
     clearInterval(this.cleanupTimer);
+    this.correlationEngine.destroy();
   }
 }
 

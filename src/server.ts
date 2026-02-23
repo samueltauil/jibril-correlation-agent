@@ -1,21 +1,38 @@
 import express from "express";
 import { EventStore } from "./events.js";
 import { handleAgentRequest } from "./agent.js";
+import { handleChainAlert } from "./alerts.js";
 import type { JibrilEvent, AgentConfig, RepoMapping } from "./types.js";
 
 const config: AgentConfig = {
   port: parseInt(process.env.PORT ?? "3000", 10),
   webhookSecret: process.env.WEBHOOK_SECRET,
   repoMappings: parseRepoMappings(process.env.REPO_MAPPINGS),
+  alertRepo: process.env.ALERT_REPO,
+  githubAppId: process.env.GITHUB_APP_ID,
+  githubAppPrivateKey: process.env.GITHUB_APP_PRIVATE_KEY,
 };
 
-const eventStore = new EventStore();
+// Set up alert callback if configured
+const alertEnabled = config.alertRepo && config.githubAppId && config.githubAppPrivateKey;
+const alertCallback = alertEnabled
+  ? (chain: import("./types.js").DetectedChain) => {
+      handleChainAlert(chain, {
+        alertRepo: config.alertRepo!,
+        appId: config.githubAppId!,
+        privateKey: config.githubAppPrivateKey!,
+      });
+    }
+  : undefined;
+
+const eventStore = new EventStore(undefined, alertCallback);
 const app = express();
 
 // Health check
 app.get("/health", (_req, res) => {
   const stats = eventStore.stats();
-  res.json({ status: "ok", events: stats });
+  const chainStats = eventStore.correlationStats();
+  res.json({ status: "ok", events: stats, chains: chainStats });
 });
 
 // Event ingestion from Jibril reactions
@@ -47,14 +64,27 @@ app.post("/agent", (req, res) => {
   handleAgentRequest(req, res, { eventStore, repoMappings: config.repoMappings });
 });
 
+// Detected chains endpoint
+app.get("/chains", (req, res) => {
+  const minConfidence = req.query.confidence ? parseFloat(req.query.confidence as string) : undefined;
+  const pattern = req.query.pattern as string | undefined;
+  const scope = req.query.scope as string | undefined;
+  const chains = eventStore.getChains({ minConfidence, pattern, scope });
+  res.json({ chains, total: chains.length });
+});
+
 // Start server
 app.listen(config.port, () => {
   console.log(`Jibril Correlation Agent listening on port ${config.port}`);
-  console.log(`  POST /events  — Jibril event ingestion`);
-  console.log(`  POST /agent   — Copilot Extension endpoint`);
-  console.log(`  GET  /health  — Health check`);
+  console.log(`  POST /events  \u2014 Jibril event ingestion`);
+  console.log(`  POST /agent   \u2014 Copilot Extension endpoint`);
+  console.log(`  GET  /health  \u2014 Health check`);
+  console.log(`  GET  /chains  \u2014 Detected attack chains`);
+  if (alertEnabled) {
+    console.log(`  Auto-alerts:   Creating issues in ${config.alertRepo}`);
+  }
   if (config.repoMappings.length > 0) {
-    console.log(`  Repo mappings: ${config.repoMappings.map(m => `${m.image} → ${m.repo}`).join(", ")}`);
+    console.log(`  Repo mappings: ${config.repoMappings.map(m => `${m.image} \u2192 ${m.repo}`).join(", ")}`);
   }
 });
 
