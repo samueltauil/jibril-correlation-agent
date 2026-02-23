@@ -106,7 +106,21 @@ Dockerfile              — Production container image
 
 ## Deployment
 
-### Docker
+### Pre-built Image (GitHub Container Registry)
+
+```bash
+docker pull ghcr.io/samueltauil/jibril-correlation-agent:latest
+
+docker run -p 3000:3000 \
+  -e REPO_MAPPINGS="myorg/api=myorg/api-server" \
+  ghcr.io/samueltauil/jibril-correlation-agent:latest
+```
+
+Available tags:
+- `latest` — latest build from main
+- `0.1.0` — pinned version
+
+### Build From Source
 
 ```bash
 docker build -t jibril-correlation-agent .
