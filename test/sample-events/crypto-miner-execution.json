@@ -1,0 +1,44 @@
+{
+  "uuid": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "timestamp": "2026-02-22T14:30:00Z",
+  "metadata": {
+    "kind": "crypto_miner_execution",
+    "name": "Crypto Miner Execution",
+    "format": "execution",
+    "version": "1.0",
+    "description": "A known cryptocurrency mining binary was executed inside a container",
+    "tactic": "execution",
+    "technique": "T1059",
+    "subtechnique": "T1059.004",
+    "importance": "critical"
+  },
+  "score": {
+    "source": "jibril",
+    "severity": 95,
+    "severity_level": "critical",
+    "confidence": 0.92,
+    "risk_score": 87.4
+  },
+  "base": {
+    "background": {
+      "ancestry": [
+        { "pid": 1, "cmd": "systemd" },
+        { "pid": 1200, "cmd": "containerd-shim" },
+        { "pid": 1201, "cmd": "node" },
+        { "pid": 1842, "cmd": "xmrig" }
+      ],
+      "flows": {}
+    }
+  },
+  "exec": {
+    "cmd": "xmrig",
+    "cmdline": "/tmp/xmrig --donate-level 1 -o stratum+tcp://pool.minexmr.com:4444 -u wallet123",
+    "args": ["--donate-level", "1", "-o", "stratum+tcp://pool.minexmr.com:4444", "-u", "wallet123"]
+  },
+  "container": {
+    "container_id": "abc123def456",
+    "container_name": "api-server",
+    "image": "myorg/api-server",
+    "image_tag": "v1.2.3"
+  }
+}

@@ -1,0 +1,33 @@
+# Example Jibril Alchemy with Shell Reaction
+# This alchemy detects suspicious executions and forwards the event
+# to the Jibril Correlation Agent for code analysis.
+#
+# Add this to your Jibril config under alchemies, or place in
+# the private alchemies directory (e.g. /etc/jibril/alchemies/private/)
+
+- kind: correlation_agent_forward
+  name: forward_high_severity_events
+  enabled: true
+  version: 1.0
+  description: "Forward high-severity events to the correlation agent"
+  documentation: |
+    Forwards all high-severity detections to the Jibril Correlation Agent
+    for runtime-to-code correlation analysis via GitHub Copilot.
+
+  breed: execution
+  mechanism: execution
+  tactic: any
+  technique: any
+  severity_level: high
+  severity: 75
+  confidence: 0.8
+
+  reactions:
+    - format: shell
+      code: |
+        AGENT_URL="${AGENT_URL:-http://localhost:3000/events}"
+        curl -sf -X POST \
+          -H "Content-Type: application/json" \
+          -H "X-Webhook-Secret: ${WEBHOOK_SECRET:-}" \
+          -d "$REACTION_DATA" \
+          "$AGENT_URL" >/dev/null 2>&1

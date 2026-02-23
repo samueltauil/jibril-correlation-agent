@@ -1,0 +1,26 @@
+{
+  "name": "jibril-correlation-agent",
+  "version": "0.1.0",
+  "description": "GitHub Copilot Extension that correlates Jibril eBPF runtime security events with source code",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "dev": "tsx watch src/server.ts"
+  },
+  "dependencies": {
+    "@copilot-extensions/preview-sdk": "^5.0.1",
+    "@octokit/rest": "^21.0.0",
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

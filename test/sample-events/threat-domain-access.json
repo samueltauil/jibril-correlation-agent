@@ -1,0 +1,46 @@
+{
+  "uuid": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+  "timestamp": "2026-02-22T14:35:00Z",
+  "metadata": {
+    "kind": "threat_domain_access",
+    "name": "Threat Domain Access",
+    "format": "network_peers",
+    "version": "1.0",
+    "description": "A process established a connection to a domain classified as a threat by reputation analysis",
+    "tactic": "command-and-control",
+    "technique": "T1071",
+    "subtechnique": "T1071.001",
+    "importance": "high"
+  },
+  "score": {
+    "source": "jibril",
+    "severity": 80,
+    "severity_level": "high",
+    "confidence": 0.85,
+    "risk_score": 68.0
+  },
+  "base": {
+    "background": {
+      "ancestry": [
+        { "pid": 1, "cmd": "systemd" },
+        { "pid": 1200, "cmd": "containerd-shim" },
+        { "pid": 2100, "cmd": "node" }
+      ],
+      "flows": {}
+    }
+  },
+  "network": {
+    "destination_ip": "185.199.42.13",
+    "destination_port": 443,
+    "source_ip": "10.0.1.15",
+    "source_port": 48231,
+    "protocol": "tcp",
+    "domain": "evil-analytics.darksite.io"
+  },
+  "container": {
+    "container_id": "def456ghi789",
+    "container_name": "api-server",
+    "image": "myorg/api-server",
+    "image_tag": "v1.2.3"
+  }
+}

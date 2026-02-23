@@ -1,0 +1,45 @@
+{
+  "uuid": "d4e5f6a7-b8c9-0123-defa-234567890123",
+  "timestamp": "2026-02-22T14:45:00Z",
+  "metadata": {
+    "kind": "exec_from_unusual_dir",
+    "name": "Execution From Unusual Directory",
+    "format": "execution",
+    "version": "1.0",
+    "description": "A binary was executed from a non-standard directory (/tmp), which may indicate a dropped payload",
+    "tactic": "execution",
+    "technique": "T1204",
+    "subtechnique": "T1204.002",
+    "importance": "medium"
+  },
+  "score": {
+    "source": "jibril",
+    "severity": 60,
+    "severity_level": "medium",
+    "confidence": 0.65,
+    "risk_score": 39.0
+  },
+  "base": {
+    "background": {
+      "ancestry": [
+        { "pid": 1, "cmd": "systemd" },
+        { "pid": 1200, "cmd": "containerd-shim" },
+        { "pid": 3000, "cmd": "node" },
+        { "pid": 3001, "cmd": "sh" },
+        { "pid": 3002, "cmd": "payload" }
+      ],
+      "flows": {}
+    }
+  },
+  "exec": {
+    "cmd": "/tmp/payload",
+    "cmdline": "/tmp/payload --exfil --target s3://data-bucket",
+    "args": ["--exfil", "--target", "s3://data-bucket"]
+  },
+  "container": {
+    "container_id": "jkl012mno345",
+    "container_name": "api-server",
+    "image": "myorg/api-server",
+    "image_tag": "v1.2.3"
+  }
+}

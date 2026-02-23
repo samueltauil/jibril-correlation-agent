@@ -1,0 +1,47 @@
+{
+  "uuid": "e5f6a7b8-c9d0-1234-efab-345678901234",
+  "timestamp": "2026-02-22T14:50:00Z",
+  "metadata": {
+    "kind": "dynamic_linker_attacks",
+    "name": "Dynamic Linker Attack",
+    "format": "env_vars",
+    "version": "1.0",
+    "description": "LD_PRELOAD environment variable was set, potentially hijacking shared library loading to inject malicious code",
+    "tactic": "persistence",
+    "technique": "T1574",
+    "subtechnique": "T1574.006",
+    "importance": "high"
+  },
+  "score": {
+    "source": "jibril",
+    "severity": 88,
+    "severity_level": "high",
+    "confidence": 0.90,
+    "risk_score": 79.2
+  },
+  "base": {
+    "background": {
+      "ancestry": [
+        { "pid": 1, "cmd": "systemd" },
+        { "pid": 1200, "cmd": "containerd-shim" },
+        { "pid": 4000, "cmd": "bash" },
+        { "pid": 4001, "cmd": "node" }
+      ],
+      "flows": {}
+    }
+  },
+  "exec": {
+    "cmd": "node",
+    "cmdline": "node server.js",
+    "env": {
+      "LD_PRELOAD": "/tmp/libhook.so",
+      "NODE_ENV": "production"
+    }
+  },
+  "container": {
+    "container_id": "mno345pqr678",
+    "container_name": "api-server",
+    "image": "myorg/api-server",
+    "image_tag": "v1.2.3"
+  }
+}
