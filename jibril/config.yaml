@@ -75,24 +75,5 @@ printer_options:
     file: /var/log/jibril.out
 
 #### events — detection recipes to enable
-
-events:
-  # file access detections (credentials_files_access handled by private alchemy with reaction)
-  - crypto_miner_files
-  - shell_config_modification
-  - binary_self_deletion
-  - core_pattern_access
-  - sudoers_modification
-  # execution detections (exec_from_unusual_dir handled by private alchemy with reaction)
-  - crypto_miner_execution
-  - hidden_elf_exec
-  - interpreter_shell_spawn
-  - code_on_the_fly
-  - credentials_text_lookup
-  - net_suspicious_tool_exec
-  # env vars detections (dynamic_linker_attacks handled by private alchemy with reaction)
-  # network detections
-  - threat_domain_access_light
-  - cloud_metadata_access
-  - fake_domain_access
-  - plaintext_communication
+#### All event types are now handled by private alchemies with shell reactions
+#### that forward events to the correlation agent. See forward-to-agent.yaml.

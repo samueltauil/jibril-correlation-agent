@@ -1,10 +1,18 @@
 # Jibril Correlation Agent
 
-A **GitHub Copilot Extension** that bridges runtime security and source code. When [Jibril](https://jibril.garnet.ai/) (an eBPF-based runtime security platform) detects anomalous behavior, this agent correlates the event with your codebase — identifying the responsible code, the commit that introduced it, and proposing a fix.
+A **GitHub Copilot Extension** that bridges runtime security and source code. When [Jibril](https://jibril.garnet.ai/) (an eBPF-based runtime security platform) detects anomalous behavior, this agent correlates events into **multi-step attack chains** using MITRE ATT&CK kill-chain ordering, then correlates with your codebase — identifying the responsible code, the commit that introduced it, and proposing a fix.
 
 ```
-[Jibril eBPF] → runtime event → [This Agent] → code analysis → [GitHub Issue / PR]
+[Jibril eBPF] → runtime events → [This Agent] → attack chain correlation → [GitHub Issue / PR]
 ```
+
+## Key Features
+
+- **Attack Chain Detection**: Automatically correlates events from the same container/host into multi-step attack patterns (e.g., credential theft → privilege escalation → persistence)
+- **MITRE ATT&CK Mapping**: Uses kill-chain ordering to detect sophisticated attacks that span multiple tactics
+- **Auto-Alerts**: Creates GitHub issues when high-confidence attack chains are detected (via GitHub App installation tokens)
+- **Code Correlation**: Searches your codebase for the source of each runtime behavior
+- **Copilot Chat Integration**: Ask `@jibril` about events, chains, and code connections
 
 ## How It Works
 
@@ -43,6 +51,9 @@ The agent starts on port 3000 (configurable via `PORT` env var).
 | `PORT` | No | Server port (default: `3000`) |
 | `WEBHOOK_SECRET` | No | Shared secret for authenticating Jibril event webhooks |
 | `REPO_MAPPINGS` | No | Map container images to GitHub repos: `image1=owner/repo1,image2=owner/repo2` |
+| `ALERT_REPO` | No | Repository for auto-alert issues: `owner/repo` |
+| `GITHUB_APP_ID` | No | GitHub App ID (required for auto-alerts) |
+| `GITHUB_APP_PRIVATE_KEY` | No | GitHub App private key PEM (required for auto-alerts) |
 
 ### Endpoints
 
@@ -50,19 +61,22 @@ The agent starts on port 3000 (configurable via `PORT` env var).
 |--------|------|-------------|
 | `POST` | `/events` | Receives Jibril event JSON from shell reactions |
 | `POST` | `/agent` | Copilot Extension endpoint (handles `@jibril` chat) |
-| `GET` | `/health` | Health check with event statistics |
+| `GET` | `/health` | Health check with event and chain statistics |
+| `GET` | `/chains` | List detected attack chains (supports ?confidence, ?pattern, ?scope filters) |
 
 ## Agent Commands
 
 Once connected as a Copilot Extension, use `@jibril` in any Copilot Chat:
 
 | Command | What it does |
-|---------|-------------|
+|---------|--------------|
 | `events` | List recent security events with LLM summary |
 | `analyze <uuid>` | Deep dive analysis of a specific event |
 | `correlate <uuid>` | Search source code and commits related to the event |
 | `create issue for <uuid>` | File a GitHub issue with structured security finding |
-| `stats` | Show event count by severity and type |
+| `chains` | List detected attack chains with kill-chain progression |
+| `chain <id>` | Deep analysis of a specific attack chain |
+| `stats` | Show event count by severity, type, and detected chains |
 
 You can also ask natural language questions — the agent will analyze the latest high-severity event in context.
 
@@ -86,12 +100,15 @@ See [`jibril/forward-to-agent.yaml`](jibril/forward-to-agent.yaml) for the compl
 
 ```
 src/
-  server.ts      — Express HTTP server, routes
+  server.ts      — Express HTTP server, routes, alert wiring
   agent.ts       — Copilot Extension handler (intent routing, SSE responses)
   events.ts      — Event ingestion, normalization, in-memory store
-  reasoning.ts   — LLM reasoning via prompt() (analysis, correlation, summaries)
-  github.ts      — GitHub API (code search, commits, issue/PR creation)
-  types.ts       — TypeScript interfaces for Jibril events
+  correlation.ts — Attack chain correlation engine (pattern matching, grouping)
+  reasoning.ts   — LLM reasoning via prompt() (analysis, correlation, chain analysis)
+  alerts.ts      — Auto-alert issue creation via GitHub App
+  github.ts      — GitHub API (code search, commits, issue/PR creation, App auth)
+  codeql.ts      — CodeQL / code scanning alert integration
+  types.ts       — TypeScript interfaces for Jibril events and attack chains
 jibril/
   config.yaml           — Jibril configuration for testing
   forward-to-agent.yaml — Private alchemy with shell reactions
