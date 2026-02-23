@@ -1,0 +1,116 @@
+#
+# Forward security events to the Jibril Correlation Agent.
+# Place in /etc/jibril/alchemies/private/
+#
+# Uses built-in kind names with unique names and shell reactions
+# to forward detected events to the agent.
+#
+
+# Credential file access → forward to agent.
+
+- kind: credentials_files_access
+  name: agent_forward_credentials
+  enabled: true
+  version: 1.0
+  description: Forward credential file access to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: credential_access
+  technique: unsecured_credentials
+  subtechnique: none
+  importance: critical
+  severity_level: critical
+  severity: 80
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - read
+    - access_related
+  file_actions_how: any
+  bases:
+    - dir: /etc
+      base: shadow
+    - dir: /etc
+      base: gshadow
+    - dir: /etc
+      base: passwd
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Execution from unusual directories → forward to agent.
+
+- kind: exec_from_unusual_dir
+  name: agent_forward_exec_unusual
+  enabled: true
+  version: 1.0
+  description: Forward exec from unusual dir to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: defense_evasion
+  technique: masquerading
+  subtechnique: none
+  importance: high
+  severity_level: high
+  severity: 60
+  confidence: 0.5
+  times:
+    - kind: times_per_parent_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: ^/(tmp|var/tmp|dev/shm)/
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Dynamic linker attacks → forward to agent.
+
+- kind: dynamic_linker_attacks
+  name: agent_forward_linker_attacks
+  enabled: true
+  version: 1.0
+  description: Forward dynamic linker attacks to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: persistence
+  technique: hijack_execution_flow
+  subtechnique: dynamic_linker_hijacking
+  importance: critical
+  severity_level: critical
+  severity: 85
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - modify_related
+    - access_related
+  file_actions_how: any
+  bases:
+    - base: ld.so.preload
+    - base: ld.so.conf
+    - dir: /etc/ld.so.conf.d
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true

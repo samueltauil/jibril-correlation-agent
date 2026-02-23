@@ -1,0 +1,98 @@
+#### Jibril config for testing with the correlation agent
+#### Run with: GARNET_SAR=true sudo -E jibril --config /path/to/config.yaml
+
+run-time:
+  log-level: info
+  health: true
+  cardinal: true
+  stdout: stdout
+  stderr: stderr
+
+#### cadences — intervals at which patterns are detected
+
+cadences:
+  file-access: 9
+  network-peers: 9
+  network-flows: 9
+  env-vars: 9
+
+#### caches
+
+caches:
+  rec-tasks: 32
+  tasks: 64
+  cmds: 32
+  args: 32
+  files: 32
+  dirs: 16
+  bases: 32
+  task-file: 32
+  file-task: 32
+  task-ref: 32
+  flows: 32
+  task-flow: 32
+  flow-task: 32
+  flow-ref: 32
+
+#### functionalities
+
+functionalities:
+  - jibril
+
+#### features
+
+features:
+  - hold
+  - procfs
+  - detect
+  - alchemies
+  - enricher
+
+feature_options:
+  alchemies:
+    builtin:
+      enabled: true
+    public:
+      enabled: false
+      paths:
+        - /etc/jibril/alchemies/public
+    private:
+      enabled: true
+      paths:
+        - /etc/jibril/alchemies/private
+
+#### printers
+
+printers:
+  - stdout
+  - varlog
+
+printer_options:
+  stdout:
+    raw: false
+  varlog:
+    raw: true
+    file: /var/log/jibril.out
+
+#### events — detection recipes to enable
+
+events:
+  # file access detections (credentials_files_access handled by private alchemy with reaction)
+  - crypto_miner_files
+  - shell_config_modification
+  - binary_self_deletion
+  - core_pattern_access
+  - sudoers_modification
+  # execution detections (exec_from_unusual_dir handled by private alchemy with reaction)
+  - crypto_miner_execution
+  - hidden_elf_exec
+  - interpreter_shell_spawn
+  - code_on_the_fly
+  - credentials_text_lookup
+  - net_suspicious_tool_exec
+  # env vars detections (dynamic_linker_attacks handled by private alchemy with reaction)
+  # network detections
+  - threat_domain_access_light
+  - cloud_metadata_access
+  - fake_domain_access
+  - plaintext_communication

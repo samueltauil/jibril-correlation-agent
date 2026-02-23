@@ -17,6 +17,7 @@ No Jibril installation required. We'll simulate events using sample JSON files.
 7. [Part 5: How It Works With Real Jibril](#part-5-how-it-works-with-real-jibril)
 8. [Part 6: Setting Up the Copilot Extension](#part-6-setting-up-the-copilot-extension)
 9. [Part 7: Docker Deployment](#part-7-docker-deployment)
+9. [Part 8: Automated End-to-End Testing with Jibril](#part-8-automated-end-to-end-testing-with-jibril)
 10. [Troubleshooting](#troubleshooting)
 
 ---
@@ -538,6 +539,53 @@ The Copilot Extension verifies requests using GitHub's public key signing. This 
 ### Events disappear after a while
 
 Events expire after 24 hours (configurable in `src/events.ts` via `DEFAULT_TTL_MS`). Re-send sample events to repopulate.
+
+---
+
+## Part 8: Automated End-to-End Testing with Jibril
+
+The `test/test-e2e.sh` script runs the full pipeline automatically — deploying configs, starting services, triggering attacks, and verifying events reach the agent. It works on both WSL and native Linux.
+
+### Prerequisites
+
+- **Linux** (native or WSL2 with kernel 5.8+)
+- **Node.js 20+**, **curl**
+- **Jibril binary** installed at `/usr/bin/jibril` ([releases](https://github.com/garnet-org/jibril-releases))
+- **sudo** access (Jibril needs root for eBPF)
+
+### Run It
+
+```bash
+# From the project root
+sudo bash test/test-e2e.sh
+```
+
+### What It Does
+
+1. **Detects environment** — WSL vs native Linux (via `/proc/version`)
+2. **Checks prerequisites** — Node.js, curl, jibril binary, sudo
+3. **Deploys config** — copies `jibril/config.yaml` and `jibril/forward-to-agent.yaml` to `/etc/jibril/`
+4. **Prepares BPF** — mounts BPF filesystem, clears stale maps
+5. **Starts agent** — runs the correlation agent on port 3000
+6. **Starts Jibril** — with `GARNET_SAR=true` (no API token needed)
+7. **Triggers attacks** — credential file access, /tmp execution, LD_PRELOAD abuse, hidden ELF, credential text lookup
+8. **Waits for cadence** — 20s for Jibril's detection cycle
+9. **Verifies results** — checks events arrived at the agent via `/health`
+10. **Cleans up** — stops agent and Jibril
+
+### Options
+
+```bash
+sudo bash test/test-e2e.sh --skip-deploy   # Don't redeploy configs
+sudo bash test/test-e2e.sh --skip-jibril   # Jibril already running
+sudo bash test/test-e2e.sh --skip-agent    # Agent already running
+```
+
+### Troubleshooting
+
+- **"No new events"**: Jibril needs ~5 minutes warm-up after eBPF programs load on first run. Run the test again after Jibril has been up for a few minutes.
+- **BPF mount fails**: On WSL, run `sudo mount -t bpf bpf /sys/fs/bpf` manually first.
+- **Stale BPF maps**: If Jibril crashes, clear maps with `rm -f /sys/fs/bpf/jb_*` before restarting.
 
 ---
 

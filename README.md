@@ -80,7 +80,7 @@ reactions:
         http://<agent-host>:3000/events
 ```
 
-See [`jibril/alchemy-example.yaml`](jibril/alchemy-example.yaml) for a complete example, and the [`test/`](test/) directory for an end-to-end walkthrough with sample events.
+See [`jibril/forward-to-agent.yaml`](jibril/forward-to-agent.yaml) for the complete working alchemy, and the [`test/`](test/) directory for an end-to-end walkthrough with sample events.
 
 ## Project Structure
 
@@ -93,10 +93,12 @@ src/
   github.ts      — GitHub API (code search, commits, issue/PR creation)
   types.ts       — TypeScript interfaces for Jibril events
 jibril/
-  reaction.sh         — Shell reaction script
-  alchemy-example.yaml — Example alchemy with reaction
+  config.yaml           — Jibril configuration for testing
+  forward-to-agent.yaml — Private alchemy with shell reactions
 test/
   GUIDE.md              — End-to-end walkthrough
+  test-e2e.sh           — Automated end-to-end test (WSL + native Linux)
+  test-real-attacks.sh  — Attack simulation triggers
   sample-events/        — Sample Jibril event JSON files
   send-events.sh        — Script to send sample events to the agent
 Dockerfile              — Production container image
