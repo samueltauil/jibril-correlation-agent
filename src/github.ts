@@ -1,4 +1,8 @@
 import { Octokit } from "@octokit/rest";
+import { createAppAuth } from "@octokit/auth-app";
+
+// Cache installation tokens (they expire in 1 hour)
+const installationCache = new Map<string, { octokit: Octokit; expiresAt: number }>();
 
 export interface CodeMatch {
   path: string;
@@ -198,19 +202,64 @@ export async function createPullRequest(
   return { number: pr.data.number, htmlUrl: pr.data.html_url };
 }
 
-/** Extract lines around a pattern match in file content */
-function extractRelevantLines(content: string, pattern: string, contextLines = 3): string {
+/** Get an Octokit instance authenticated as a GitHub App installation */
+export async function getInstallationOctokit(
+  owner: string,
+  repo: string,
+  appId: string,
+  privateKey: string,
+): Promise<Octokit> {
+  const cacheKey = `${owner}/${repo}`;
+  const cached = installationCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now() + 5 * 60 * 1000) {
+    return cached.octokit;
+  }
+
+  // Create app-authenticated Octokit to find installation ID
+  const appOctokit = new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId,
+      privateKey,
+    },
+  });
+
+  // Get the installation for this repo
+  const { data: installation } = await appOctokit.apps.getRepoInstallation({
+    owner,
+    repo,
+  });
+
+  // Create installation-authenticated Octokit
+  const installationOctokit = new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId,
+      privateKey,
+      installationId: installation.id,
+    },
+  });
+
+  // Cache for 50 minutes (tokens last 1 hour)
+  installationCache.set(cacheKey, {
+    octokit: installationOctokit,
+    expiresAt: Date.now() + 50 * 60 * 1000,
+  });
+
+  return installationOctokit;
+}
+
+/** Extract relevant lines around a pattern match */
+function extractRelevantLines(content: string, pattern: string, contextLines = 5): string {
   const lines = content.split("\n");
   const patternLower = pattern.toLowerCase();
-  const matchIndex = lines.findIndex(line => line.toLowerCase().includes(patternLower));
+  const matchIndex = lines.findIndex(l => l.toLowerCase().includes(patternLower));
 
   if (matchIndex === -1) {
-    return lines.slice(0, 10).join("\n") + (lines.length > 10 ? "\n..." : "");
+    return lines.slice(0, contextLines * 2).join("\n");
   }
 
   const start = Math.max(0, matchIndex - contextLines);
   const end = Math.min(lines.length, matchIndex + contextLines + 1);
-  const slice = lines.slice(start, end);
-
-  return (start > 0 ? "...\n" : "") + slice.join("\n") + (end < lines.length ? "\n..." : "");
+  return lines.slice(start, end).join("\n");
 }

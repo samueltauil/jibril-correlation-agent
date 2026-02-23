@@ -1,5 +1,5 @@
 import { prompt } from "@copilot-extensions/preview-sdk";
-import type { NormalizedEvent } from "./types.js";
+import type { NormalizedEvent, DetectedChain } from "./types.js";
 
 const SYSTEM_PROMPT = `You are a security analyst specializing in runtime-to-code correlation. You work with Jibril, an eBPF-based runtime security platform that monitors Linux systems and Kubernetes clusters.
 
@@ -86,25 +86,77 @@ Provide:
   return result.message.content ?? "";
 }
 
-/** Generate a summary of multiple events */
+/** Generate a summary of multiple events, including detected attack chains */
 export async function summarizeEvents(
   events: NormalizedEvent[],
   token: string,
+  chains?: DetectedChain[],
 ): Promise<string> {
   const summaries = events.map(e => {
     const s = e.event.score;
     const m = e.event.metadata;
-    return `- [${s.severity_level.toUpperCase()}] ${m.name} (${m.kind}) | severity: ${s.severity}, confidence: ${s.confidence} | ${e.event.timestamp}`;
+    const container = e.event.container;
+    const containerInfo = container?.container_name ?? container?.container_id ?? "host";
+    const ancestry = e.event.base?.background?.ancestry;
+    const ancestryRoot = ancestry?.length ? ancestry[ancestry.length - 1].cmd : "unknown";
+    return `- [${s.severity_level.toUpperCase()}] ${m.name} (${m.kind}) | tactic: ${m.tactic} | severity: ${s.severity}, confidence: ${s.confidence} | container: ${containerInfo} | ancestry root: ${ancestryRoot} | ${e.event.timestamp}`;
   }).join("\n");
 
+  let chainSection = "";
+  if (chains && chains.length > 0) {
+    const chainSummaries = chains.map(c => {
+      const steps = c.matchedEvents.map(e => e.event.metadata.tactic).join(" \u2192 ");
+      return `- **${c.pattern.name}** (confidence: ${(c.confidence * 100).toFixed(0)}%) \u2014 ${steps} | scope: ${c.scope}`;
+    }).join("\n");
+    chainSection = `\n\n## Detected Attack Chains\n${chainSummaries}\n\nIncorporate the attack chain analysis in your response. Explain how the individual events connect to form a multi-step attack.`;
+  }
+
   const result = await prompt(
-    `Summarize these runtime security events. Group by severity, identify patterns, and highlight the most critical items that need immediate attention:\n\n${summaries}`,
+    `Summarize these runtime security events. Group by severity, identify patterns, and highlight the most critical items that need immediate attention:\n\n${summaries}${chainSection}`,
     {
       model: "gpt-4o",
       token,
       messages: [{ role: "system", content: SYSTEM_PROMPT }],
     },
   );
+
+  return result.message.content ?? "";
+}
+
+/** Analyze a detected attack chain using LLM reasoning */
+export async function correlateChains(
+  chain: DetectedChain,
+  token: string,
+): Promise<string> {
+  const eventDetails = chain.matchedEvents.map((event, i) => {
+    return `### Step ${i + 1}: ${event.event.metadata.tactic}\n${formatEventForLLM(event)}`;
+  }).join("\n\n");
+
+  const userPrompt = `Analyze this detected attack chain and provide a security assessment.
+
+## Attack Chain: ${chain.pattern.name}
+**Description**: ${chain.pattern.description}
+**Confidence**: ${(chain.confidence * 100).toFixed(0)}%
+**Scope**: ${chain.scope}
+**Time span**: ${new Date(chain.firstSeen).toISOString()} \u2192 ${new Date(chain.lastSeen).toISOString()}
+**Status**: ${chain.status}
+
+## Events in Chain (ordered by time)
+
+${eventDetails}
+
+Provide:
+1. **Attack narrative**: Explain how these events form a coherent multi-step attack
+2. **True positive assessment**: Is this a real attack chain or coincidental events?
+3. **Investigation order**: Which event should be investigated first and why?
+4. **Containment actions**: Immediate steps to contain the threat
+5. **MITRE ATT&CK mapping**: Map each step to the kill chain stage`;
+
+  const result = await prompt(userPrompt, {
+    model: "gpt-4o",
+    token,
+    messages: [{ role: "system", content: SYSTEM_PROMPT }],
+  });
 
   return result.message.content ?? "";
 }
@@ -125,7 +177,7 @@ function formatEventForLLM(event: NormalizedEvent): string {
   if (e.base?.background?.ancestry?.length) {
     const ancestry = e.base.background.ancestry
       .map(a => `${a.cmd} (PID ${a.pid})`)
-      .join(" → ");
+      .join(" \u2192 ");
     parts.push(`**Process Ancestry**: ${ancestry}`);
   }
 
@@ -140,7 +192,7 @@ function formatEventForLLM(event: NormalizedEvent): string {
 
   if (e.network) {
     const net = e.network;
-    parts.push(`**Network**: ${net.source_ip ?? "?"}:${net.source_port ?? "?"} → ${net.destination_ip ?? "?"}:${net.destination_port ?? "?"} (${net.protocol ?? "?"})`);
+    parts.push(`**Network**: ${net.source_ip ?? "?"}:${net.source_port ?? "?"} \u2192 ${net.destination_ip ?? "?"}:${net.destination_port ?? "?"} (${net.protocol ?? "?"})`);
     if (net.domain) parts.push(`**Domain**: ${net.domain}`);
   }
 
