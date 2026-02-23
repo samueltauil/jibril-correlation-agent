@@ -46,6 +46,516 @@
       code: |
         curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
 
+# Crypto miner files → forward to agent.
+
+- kind: crypto_miner_files
+  name: agent_forward_crypto_miner_files
+  enabled: true
+  version: 1.0
+  description: Forward crypto miner file access to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: impact
+  technique: resource_hijacking
+  subtechnique: none
+  importance: critical
+  severity_level: critical
+  severity: 85
+  confidence: 0.6
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - read
+    - access_related
+  file_actions_how: any
+  bases:
+    - regex: .*\.(minerconfig|stratumconfig)$
+    - base: config.json
+      dir: /tmp
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Shell config modification → forward to agent.
+
+- kind: shell_config_modification
+  name: agent_forward_shell_config_mod
+  enabled: true
+  version: 1.0
+  description: Forward shell config modification to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: persistence
+  technique: event_triggered_execution
+  subtechnique: unix_shell_configuration_modification
+  importance: high
+  severity_level: high
+  severity: 65
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - modify_related
+  file_actions_how: any
+  bases:
+    - base: .bashrc
+    - base: .bash_profile
+    - base: .profile
+    - base: .zshrc
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Binary self deletion → forward to agent.
+
+- kind: binary_self_deletion
+  name: agent_forward_binary_self_delete
+  enabled: true
+  version: 1.0
+  description: Forward binary self deletion to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: defense_evasion
+  technique: indicator_removal
+  subtechnique: file_deletion
+  importance: high
+  severity_level: high
+  severity: 70
+  confidence: 0.6
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - modify_related
+  file_actions_how: any
+  bases:
+    - regex: /proc/self/exe
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Core pattern access → forward to agent.
+
+- kind: core_pattern_access
+  name: agent_forward_core_pattern
+  enabled: true
+  version: 1.0
+  description: Forward core pattern access to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: privilege_escalation
+  technique: exploitation_for_privilege_escalation
+  subtechnique: none
+  importance: critical
+  severity_level: critical
+  severity: 80
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - modify_related
+  file_actions_how: any
+  bases:
+    - dir: /proc/sys/kernel
+      base: core_pattern
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Sudoers modification → forward to agent.
+
+- kind: sudoers_modification
+  name: agent_forward_sudoers_mod
+  enabled: true
+  version: 1.0
+  description: Forward sudoers modification to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: privilege_escalation
+  technique: abuse_elevation_control_mechanism
+  subtechnique: sudo_and_sudo_caching
+  importance: critical
+  severity_level: critical
+  severity: 85
+  confidence: 0.6
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - modify_related
+  file_actions_how: any
+  bases:
+    - base: sudoers
+      dir: /etc
+    - dir: /etc/sudoers.d
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Crypto miner execution → forward to agent.
+
+- kind: crypto_miner_execution
+  name: agent_forward_crypto_miner_exec
+  enabled: true
+  version: 1.0
+  description: Forward crypto miner execution to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: impact
+  technique: resource_hijacking
+  subtechnique: none
+  importance: critical
+  severity_level: critical
+  severity: 90
+  confidence: 0.7
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: (xmrig|minerd|cpuminer|ethminer|cgminer|bfgminer|nicehash)
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Hidden ELF execution → forward to agent.
+
+- kind: hidden_elf_exec
+  name: agent_forward_hidden_elf
+  enabled: true
+  version: 1.0
+  description: Forward hidden ELF execution to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: defense_evasion
+  technique: masquerading
+  subtechnique: none
+  importance: high
+  severity_level: high
+  severity: 65
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: /\.
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Interpreter shell spawn → forward to agent.
+
+- kind: interpreter_shell_spawn
+  name: agent_forward_interpreter_shell
+  enabled: true
+  version: 1.0
+  description: Forward interpreter shell spawn to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: execution
+  technique: command_and_scripting_interpreter
+  subtechnique: unix_shell
+  importance: medium
+  severity_level: medium
+  severity: 50
+  confidence: 0.4
+  times:
+    - kind: times_per_parent_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: /(bash|sh|zsh|dash|csh|ksh|fish)$
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Code on the fly → forward to agent.
+
+- kind: code_on_the_fly
+  name: agent_forward_code_on_the_fly
+  enabled: true
+  version: 1.0
+  description: Forward code on the fly execution to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: defense_evasion
+  technique: obfuscated_files_or_information
+  subtechnique: none
+  importance: high
+  severity_level: high
+  severity: 70
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: ^/(dev/fd|proc/self/fd)/
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Credentials text lookup → forward to agent.
+
+- kind: credentials_text_lookup
+  name: agent_forward_creds_text_lookup
+  enabled: true
+  version: 1.0
+  description: Forward credentials text lookup to correlation agent
+  breed: file_access
+  mechanism: file_access
+  tactic: credential_access
+  technique: unsecured_credentials
+  subtechnique: credentials_in_files
+  importance: high
+  severity_level: high
+  severity: 65
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - read
+    - access_related
+  file_actions_how: any
+  bases:
+    - regex: \.(pem|key|p12|pfx|jks|keystore|credentials|aws|gcp)$
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Network suspicious tool execution → forward to agent.
+
+- kind: net_suspicious_tool_exec
+  name: agent_forward_net_suspicious_tool
+  enabled: true
+  version: 1.0
+  description: Forward network suspicious tool execution to correlation agent
+  breed: file_access
+  mechanism: execution
+  tactic: command_and_control
+  technique: ingress_tool_transfer
+  subtechnique: none
+  importance: high
+  severity_level: high
+  severity: 70
+  confidence: 0.6
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions:
+    - execve
+  file_actions_how: any
+  bases:
+    - regex: (wget|curl|nc|ncat|socat|nmap|masscan)$
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Threat domain access → forward to agent.
+
+- kind: threat_domain_access_light
+  name: agent_forward_threat_domain
+  enabled: true
+  version: 1.0
+  description: Forward threat domain access to correlation agent
+  breed: network_peers
+  mechanism: network_peers
+  tactic: command_and_control
+  technique: application_layer_protocol
+  subtechnique: dns
+  importance: critical
+  severity_level: critical
+  severity: 85
+  confidence: 0.7
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions: []
+  file_actions_how: any
+  bases: []
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Cloud metadata access → forward to agent.
+
+- kind: cloud_metadata_access
+  name: agent_forward_cloud_metadata
+  enabled: true
+  version: 1.0
+  description: Forward cloud metadata access to correlation agent
+  breed: network_peers
+  mechanism: network_peers
+  tactic: credential_access
+  technique: unsecured_credentials
+  subtechnique: cloud_instance_metadata_api
+  importance: critical
+  severity_level: critical
+  severity: 80
+  confidence: 0.6
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions: []
+  file_actions_how: any
+  bases: []
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Fake domain access → forward to agent.
+
+- kind: fake_domain_access
+  name: agent_forward_fake_domain
+  enabled: true
+  version: 1.0
+  description: Forward fake domain access to correlation agent
+  breed: network_peers
+  mechanism: network_peers
+  tactic: command_and_control
+  technique: application_layer_protocol
+  subtechnique: dns
+  importance: high
+  severity_level: high
+  severity: 70
+  confidence: 0.5
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions: []
+  file_actions_how: any
+  bases: []
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
+# Plaintext communication → forward to agent.
+
+- kind: plaintext_communication
+  name: agent_forward_plaintext_comms
+  enabled: true
+  version: 1.0
+  description: Forward plaintext communication to correlation agent
+  breed: network_peers
+  mechanism: network_peers
+  tactic: credential_access
+  technique: network_sniffing
+  subtechnique: none
+  importance: medium
+  severity_level: medium
+  severity: 50
+  confidence: 0.4
+  times:
+    - kind: times_per_proc
+      max: 2
+    - kind: times_per_exe
+      max: 4
+    - kind: times_per_full_ancestry
+      max: 4
+  arbitrary: []
+  file_actions: []
+  file_actions_how: any
+  bases: []
+  reactions:
+    - format: shell
+      code: |
+        curl -sf -X POST -H "Content-Type: application/json" -d "$REACTION_DATA" http://localhost:3000/events || true
+
 # Execution from unusual directories → forward to agent.
 
 - kind: exec_from_unusual_dir
