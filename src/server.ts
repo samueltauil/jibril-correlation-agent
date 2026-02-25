@@ -43,33 +43,43 @@ async function main() {
 
   // Health check
   app.get("/health", async (_req, res) => {
-    const stats = await eventStore.stats();
-    const chainStats = await eventStore.correlationStats();
-    res.json({ status: "ok", events: stats, chains: chainStats });
+    try {
+      const stats = await eventStore.stats();
+      const chainStats = await eventStore.correlationStats();
+      res.json({ status: "ok", events: stats, chains: chainStats });
+    } catch (err) {
+      console.error("[health] Error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Event ingestion from Jibril reactions
   app.post("/events", express.json({ limit: "1mb" }), async (req, res) => {
-    // Optional: verify webhook secret
-    if (config.webhookSecret) {
-      const providedSecret = req.headers["x-webhook-secret"];
-      if (providedSecret !== config.webhookSecret) {
-        res.status(401).json({ error: "Invalid webhook secret" });
+    try {
+      // Optional: verify webhook secret
+      if (config.webhookSecret) {
+        const providedSecret = req.headers["x-webhook-secret"];
+        if (providedSecret !== config.webhookSecret) {
+          res.status(401).json({ error: "Invalid webhook secret" });
+          return;
+        }
+      }
+
+      const body = req.body as JibrilEvent;
+
+      if (!body.uuid || !body.metadata) {
+        res.status(400).json({ error: "Invalid event: missing uuid or metadata" });
         return;
       }
+
+      const normalized = await eventStore.ingest(body, "reaction", config.repoMappings);
+      console.log(`[event] Ingested ${normalized.id} | ${normalized.event.metadata.name} | ${normalized.event.score.severity_level}`);
+
+      res.status(201).json({ id: normalized.id, status: "ingested" });
+    } catch (err) {
+      console.error("[events] Error:", err);
+      res.status(500).json({ error: "Internal server error" });
     }
-
-    const body = req.body as JibrilEvent;
-
-    if (!body.uuid || !body.metadata) {
-      res.status(400).json({ error: "Invalid event: missing uuid or metadata" });
-      return;
-    }
-
-    const normalized = await eventStore.ingest(body, "reaction", config.repoMappings);
-    console.log(`[event] Ingested ${normalized.id} | ${normalized.event.metadata.name} | ${normalized.event.score.severity_level}`);
-
-    res.status(201).json({ id: normalized.id, status: "ingested" });
   });
 
   // Copilot Extension agent endpoint
@@ -79,11 +89,16 @@ async function main() {
 
   // Detected chains endpoint
   app.get("/chains", async (req, res) => {
-    const minConfidence = req.query.confidence ? parseFloat(req.query.confidence as string) : undefined;
-    const pattern = req.query.pattern as string | undefined;
-    const scope = req.query.scope as string | undefined;
-    const chains = await eventStore.getChains({ minConfidence, pattern, scope });
-    res.json({ chains, total: chains.length });
+    try {
+      const minConfidence = req.query.confidence ? parseFloat(req.query.confidence as string) : undefined;
+      const pattern = req.query.pattern as string | undefined;
+      const scope = req.query.scope as string | undefined;
+      const chains = await eventStore.getChains({ minConfidence, pattern, scope });
+      res.json({ chains, total: chains.length });
+    } catch (err) {
+      console.error("[chains] Error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   // Start server

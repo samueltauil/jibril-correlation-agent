@@ -212,7 +212,7 @@ export class CosmosStore {
   }
 
   async getGroupCount(): Promise<number> {
-    const { resources } = await this.eventsContainer.items
+    const { resources } = await this.correlationContainer.items
       .query<number>({ query: "SELECT VALUE COUNT(1) FROM c WHERE c.type = 'group'" })
       .fetchAll();
     return resources[0] ?? 0;
@@ -275,7 +275,7 @@ export class CosmosStore {
     const conditions = ["c.type = 'chain'"];
     const params: { name: string; value: string | number }[] = [];
 
-    if (options?.minConfidence) {
+    if (options && options.minConfidence != null) {
       conditions.push("c.chain.confidence >= @minConfidence");
       params.push({ name: "@minConfidence", value: options.minConfidence });
     }
