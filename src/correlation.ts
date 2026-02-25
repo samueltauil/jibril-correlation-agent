@@ -6,6 +6,7 @@ import type {
   DetectedChain,
   CorrelationGroup,
 } from "./types.js";
+import type { CosmosStore } from "./cosmos.js";
 
 const DEFAULT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -87,32 +88,38 @@ export class CorrelationEngine {
   private groups = new Map<string, CorrelationGroup>();
   private detectedChains = new Map<string, DetectedChain>();
   private alertHistory = new Map<string, number>(); // pattern+scope \u2192 last alert timestamp
-  private cleanupTimer: ReturnType<typeof setInterval>;
+  private cleanupTimer: ReturnType<typeof setInterval> | undefined;
   private alertCallback?: AlertCallback;
   private patterns: AttackChainPattern[];
   private windowMs: number;
   private threshold: number;
+  private cosmos?: CosmosStore;
 
   constructor(options?: {
     patterns?: AttackChainPattern[];
     windowMs?: number;
     threshold?: number;
     alertCallback?: AlertCallback;
+    cosmos?: CosmosStore;
   }) {
     this.patterns = options?.patterns ?? ATTACK_CHAIN_PATTERNS;
     this.windowMs = options?.windowMs ?? DEFAULT_WINDOW_MS;
     this.threshold = options?.threshold ?? DEFAULT_THRESHOLD;
     this.alertCallback = options?.alertCallback;
-    this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
+    this.cosmos = options?.cosmos;
+    // Only run cleanup timer in in-memory mode
+    if (!this.cosmos) {
+      this.cleanupTimer = setInterval(() => this.cleanup(), CLEANUP_INTERVAL_MS);
+    }
   }
 
   /** Process a newly ingested event */
-  onEvent(event: NormalizedEvent): DetectedChain[] {
+  async onEvent(event: NormalizedEvent): Promise<DetectedChain[]> {
     const keys = this.getScopeKeys(event);
     const newChains: DetectedChain[] = [];
 
     for (const key of keys) {
-      const group = this.getOrCreateGroup(key);
+      const group = await this.getOrCreateGroup(key);
       group.events.push(event);
       group.lastUpdated = event.receivedAt;
 
@@ -120,11 +127,24 @@ export class CorrelationEngine {
       const chains = this.evaluateGroup(group);
       for (const chain of chains) {
         const dedupeKey = `${chain.pattern.id}:${chain.scope}`;
-        if (!this.detectedChains.has(dedupeKey)) {
-          this.detectedChains.set(dedupeKey, chain);
+        const exists = this.cosmos
+          ? (await this.cosmos.getChain(chain.id)) !== undefined
+          : this.detectedChains.has(dedupeKey);
+
+        if (!exists) {
+          if (this.cosmos) {
+            await this.cosmos.upsertChain(dedupeKey, chain);
+          } else {
+            this.detectedChains.set(dedupeKey, chain);
+          }
           newChains.push(chain);
-          this.maybeAlert(chain);
+          await this.maybeAlert(chain);
         }
+      }
+
+      // Persist group state
+      if (this.cosmos) {
+        await this.cosmos.upsertGroup(group);
       }
     }
 
@@ -161,7 +181,7 @@ export class CorrelationEngine {
     return undefined;
   }
 
-  /** Get correlation statistics */
+  /** Get correlation statistics (in-memory only; Cosmos mode uses CosmosStore directly) */
   stats(): {
     totalChains: number;
     byPattern: Record<string, number>;
@@ -297,17 +317,35 @@ export class CorrelationEngine {
   }
 
   /** Get or create a correlation group */
-  private getOrCreateGroup(key: string): CorrelationGroup {
-    let group = this.groups.get(key);
-    if (!group) {
-      group = { key, events: [], chains: [], lastUpdated: Date.now() };
-      this.groups.set(key, group);
+  private async getOrCreateGroup(key: string): Promise<CorrelationGroup> {
+    // In-memory path
+    if (!this.cosmos) {
+      let group = this.groups.get(key);
+      if (!group) {
+        group = { key, events: [], chains: [], lastUpdated: Date.now() };
+        this.groups.set(key, group);
+      }
+      return group;
     }
-    return group;
+
+    // Cosmos path: reconstruct group from stored event IDs
+    const stored = await this.cosmos.getGroup(key);
+    if (!stored) {
+      return { key, events: [], chains: [], lastUpdated: Date.now() };
+    }
+
+    // Fetch the actual events by ID
+    const events: NormalizedEvent[] = [];
+    for (const id of stored.eventIds) {
+      const ev = await this.cosmos.getEvent(id);
+      if (ev) events.push(ev);
+    }
+
+    return { key, events, chains: [], lastUpdated: stored.lastUpdated };
   }
 
   /** Maybe fire an alert for a detected chain */
-  private maybeAlert(chain: DetectedChain): void {
+  private async maybeAlert(chain: DetectedChain): Promise<void> {
     if (!this.alertCallback) return;
 
     // Only alert for high-confidence chains with at least one critical event
@@ -318,10 +356,17 @@ export class CorrelationEngine {
 
     // Throttle: max 1 alert per pattern+scope per hour
     const throttleKey = `${chain.pattern.id}:${chain.scope}`;
-    const lastAlert = this.alertHistory.get(throttleKey);
-    if (lastAlert && Date.now() - lastAlert < ALERT_COOLDOWN_MS) return;
 
-    this.alertHistory.set(throttleKey, Date.now());
+    if (this.cosmos) {
+      const lastAlert = await this.cosmos.getAlertTimestamp(throttleKey);
+      if (lastAlert && Date.now() - lastAlert < ALERT_COOLDOWN_MS) return;
+      await this.cosmos.setAlertTimestamp(throttleKey, Date.now());
+    } else {
+      const lastAlert = this.alertHistory.get(throttleKey);
+      if (lastAlert && Date.now() - lastAlert < ALERT_COOLDOWN_MS) return;
+      this.alertHistory.set(throttleKey, Date.now());
+    }
+
     chain.status = "escalated";
     this.alertCallback(chain);
   }
@@ -343,6 +388,8 @@ export class CorrelationEngine {
   }
 
   destroy(): void {
-    clearInterval(this.cleanupTimer);
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+    }
   }
 }

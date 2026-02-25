@@ -54,6 +54,8 @@ The agent starts on port 3000 (configurable via `PORT` env var).
 | `ALERT_REPO` | No | Repository for auto-alert issues: `owner/repo` |
 | `GITHUB_APP_ID` | No | GitHub App ID (required for auto-alerts) |
 | `GITHUB_APP_PRIVATE_KEY` | No | GitHub App private key PEM (required for auto-alerts) |
+| `COSMOS_ENDPOINT` | No | Azure Cosmos DB endpoint URL (enables persistent storage) |
+| `COSMOS_DATABASE` | No | Cosmos DB database name (default: `jibril`) |
 
 ### Endpoints
 
@@ -102,13 +104,18 @@ See [`jibril/forward-to-agent.yaml`](jibril/forward-to-agent.yaml) for the compl
 src/
   server.ts      — Express HTTP server, routes, alert wiring
   agent.ts       — Copilot Extension handler (intent routing, SSE responses)
-  events.ts      — Event ingestion, normalization, in-memory store
+  store.ts       — Storage abstraction (IEventStore, CosmosEventStore, InMemoryEventStore)
+  cosmos.ts      — Azure Cosmos DB client and CRUD helpers
+  events.ts      — Backward-compat re-exports from store.ts
   correlation.ts — Attack chain correlation engine (pattern matching, grouping)
   reasoning.ts   — LLM reasoning via prompt() (analysis, correlation, chain analysis)
   alerts.ts      — Auto-alert issue creation via GitHub App
   github.ts      — GitHub API (code search, commits, issue/PR creation, App auth)
   codeql.ts      — CodeQL / code scanning alert integration
   types.ts       — TypeScript interfaces for Jibril events and attack chains
+infra/
+  main.bicep         — Azure resource definitions (Cosmos DB, Container Apps, RBAC)
+  parameters.json    — Deployment parameters template
 jibril/
   config.yaml           — Jibril configuration for testing
   forward-to-agent.yaml — Private alchemy with shell reactions
@@ -118,6 +125,8 @@ test/
   test-real-attacks.sh  — Attack simulation triggers
   sample-events/        — Sample Jibril event JSON files
   send-events.sh        — Script to send sample events to the agent
+.github/workflows/
+  deploy.yml            — CI/CD: build, push to GHCR, deploy to Azure
 Dockerfile              — Production container image
 ```
 
@@ -145,6 +154,45 @@ docker run -p 3000:3000 \
   -e REPO_MAPPINGS="myorg/api=myorg/api-server" \
   jibril-correlation-agent
 ```
+
+### Azure Deployment
+
+The agent can be deployed to Azure Container Apps with Cosmos DB for persistent storage (~$0–10/month).
+
+**Prerequisites**: Azure CLI, a resource group, and a GitHub App configured for the Copilot Extension.
+
+```bash
+# Login and create resource group
+az login
+az group create --name jibril-rg --location eastus
+
+# Deploy all resources (Cosmos DB + Container Apps + RBAC)
+az deployment group create \
+  --resource-group jibril-rg \
+  --template-file infra/main.bicep \
+  --parameters infra/parameters.json \
+  --parameters \
+    githubAppId="<your-app-id>" \
+    githubAppPrivateKey="$(cat path/to/private-key.pem)" \
+    webhookSecret="<your-secret>" \
+    alertRepo="owner/repo" \
+    repoMappings="image1=owner/repo1"
+```
+
+**What gets deployed**:
+- **Cosmos DB** (NoSQL, serverless, free tier, local auth disabled)
+- **Container Apps** (consumption plan, scale-to-zero, system-assigned managed identity)
+- **RBAC role assignment** (Cosmos DB Data Contributor for Container App)
+
+Authentication uses managed identity via `DefaultAzureCredential` — no Cosmos keys needed.
+
+**CI/CD**: The included GitHub Actions workflow (`.github/workflows/deploy.yml`) builds the Docker image, pushes to GHCR, and deploys to Azure on every push to `main`. Configure these repository secrets:
+- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (federated identity)
+- `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `WEBHOOK_SECRET`
+
+**Storage modes**:
+- **Cosmos DB** (set `COSMOS_ENDPOINT`): Events, chains, and correlation state persist across restarts. TTL auto-expires old data.
+- **In-memory** (no `COSMOS_ENDPOINT`): Everything lives in memory — perfect for local dev. No Azure account needed.
 
 ### Exposing the Agent
 

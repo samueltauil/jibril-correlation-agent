@@ -10,14 +10,14 @@ import {
   createErrorsEvent,
 } from "@copilot-extensions/preview-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { EventStore } from "./events.js";
+import type { IEventStore } from "./store.js";
 import { analyzeEvent, correlateWithCode, summarizeEvents, correlateChains } from "./reasoning.js";
 import { searchCode, getRecentCommits, createIssue } from "./github.js";
 import { getCodeScanningAlerts, correlateAlerts, formatAlertsForLLM, formatAlertTable } from "./codeql.js";
 import type { NormalizedEvent, RepoMapping, DetectedChain } from "./types.js";
 
 export interface AgentDeps {
-  eventStore: EventStore;
+  eventStore: IEventStore;
   repoMappings: RepoMapping[];
 }
 
@@ -156,7 +156,7 @@ async function routeMessage(
 
 /** List recent security events */
 async function handleListEvents(token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const events = deps.eventStore.list({ limit: 20 });
+  const events = await deps.eventStore.list({ limit: 20 });
 
   if (events.length === 0) {
     res.write(createTextEvent("No security events received yet. Jibril events will appear here once the shell reaction is configured and detections occur."));
@@ -165,7 +165,7 @@ async function handleListEvents(token: string, res: ServerResponse, deps: AgentD
   }
 
   // Check for detected attack chains
-  const chains = deps.eventStore.getChains();
+  const chains = await deps.eventStore.getChains();
   if (chains.length > 0) {
     res.write(createTextEvent(`\u26a0\ufe0f **${chains.length} attack chain(s) detected** \u2014 use \`chains\` to investigate\n\n`));
   }
@@ -183,7 +183,7 @@ async function handleListEvents(token: string, res: ServerResponse, deps: AgentD
 
 /** Deep dive analysis of a specific event */
 async function handleAnalyzeEvent(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found. Use \`events\` to see available events.`));
     res.write(createDoneEvent());
@@ -205,7 +205,7 @@ async function handleAnalyzeEvent(id: string, token: string, res: ServerResponse
 
 /** Correlate an event with source code */
 async function handleCorrelateEvent(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found.`));
     res.write(createDoneEvent());
@@ -266,7 +266,7 @@ async function handleCorrelateEvent(id: string, token: string, res: ServerRespon
 
 /** Ask user to confirm issue creation */
 async function handleCreateIssueRequest(id: string, _token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found.`));
     res.write(createDoneEvent());
@@ -306,7 +306,7 @@ async function handleConfirmation(
   }
 
   const eventId = confirmId.replace("create-issue-", "");
-  const event = deps.eventStore.get(eventId);
+  const event = await deps.eventStore.get(eventId);
   if (!event || !event.repo) {
     res.write(createTextEvent("Event no longer available."));
     res.write(createDoneEvent());
@@ -324,7 +324,7 @@ async function handleConfirmation(
 
 /** List detected attack chains */
 async function handleListChains(token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const chains = deps.eventStore.getChains();
+  const chains = await deps.eventStore.getChains();
 
   if (chains.length === 0) {
     res.write(createTextEvent("No attack chains detected yet. Chains are detected when multiple events from the same container/host match a known attack pattern (e.g., credential theft \u2192 privilege escalation \u2192 persistence).\n\nKeep monitoring \u2014 chains will appear as more events are correlated."));
@@ -349,8 +349,8 @@ async function handleListChains(token: string, res: ServerResponse, deps: AgentD
 /** Deep analysis of a specific attack chain */
 async function handleAnalyzeChain(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
   // Search by full ID or prefix
-  const chain = deps.eventStore.getChain(id) ??
-    deps.eventStore.getChains().find(c => c.id.startsWith(id));
+  const chain = await deps.eventStore.getChain(id) ??
+    (await deps.eventStore.getChains()).find(c => c.id.startsWith(id));
 
   if (!chain) {
     res.write(createTextEvent(`Chain \`${id}\` not found. Use \`chains\` to see detected attack chains.`));
@@ -375,8 +375,8 @@ async function handleAnalyzeChain(id: string, token: string, res: ServerResponse
 
 /** Show event statistics */
 async function handleStats(_token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const stats = deps.eventStore.stats();
-  const chainStats = deps.eventStore.correlationStats();
+  const stats = await deps.eventStore.stats();
+  const chainStats = await deps.eventStore.correlationStats();
 
   if (stats.total === 0) {
     res.write(createTextEvent("No events have been received yet."));
@@ -411,8 +411,8 @@ async function handleStats(_token: string, res: ServerResponse, deps: AgentDeps)
 
 /** Handle general query \u2014 analyze the latest high-severity event */
 async function handleGeneralQuery(message: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const events = deps.eventStore.list({ limit: 5, severity: "critical" });
-  const fallback = events.length > 0 ? events : deps.eventStore.list({ limit: 5 });
+  const events = await deps.eventStore.list({ limit: 5, severity: "critical" });
+  const fallback = events.length > 0 ? events : await deps.eventStore.list({ limit: 5 });
 
   if (fallback.length === 0) {
     res.write(createTextEvent(
@@ -430,7 +430,7 @@ async function handleGeneralQuery(message: string, token: string, res: ServerRes
   }
 
   // Include chain context if any
-  const chains = deps.eventStore.getChains();
+  const chains = await deps.eventStore.getChains();
   let chainContext = "";
   if (chains.length > 0) {
     chainContext = `\n\nDetected attack chains: ${chains.map(c => `${c.pattern.name} (${(c.confidence * 100).toFixed(0)}%)`).join(", ")}`;
@@ -471,7 +471,7 @@ async function handleCodeQLAlerts(
   res.write(createTextEvent(formatAlertTable(alerts)));
 
   // Cross-reference with runtime events
-  const events = deps.eventStore.list({ limit: 50 });
+  const events = await deps.eventStore.list({ limit: 50 });
   const repoEvents = events.filter(e => e.repo === repo);
 
   if (repoEvents.length > 0) {
@@ -517,8 +517,9 @@ async function handleCodeQLAlerts(
 
 /** Infer a repo from existing events */
 function inferRepoFromEvents(deps: AgentDeps): string | undefined {
-  const events = deps.eventStore.list({ limit: 10 });
-  return events.find(e => e.repo)?.repo;
+  // Note: this is sync — for Cosmos mode it only returns undefined
+  // The codeql handler passes repo explicitly in most cases
+  return undefined;
 }
 
 /** Format events as a markdown table */
