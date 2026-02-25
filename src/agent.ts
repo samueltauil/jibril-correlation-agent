@@ -10,14 +10,14 @@ import {
   createErrorsEvent,
 } from "@copilot-extensions/preview-sdk";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { EventStore } from "./events.js";
-import { analyzeEvent, correlateWithCode, summarizeEvents } from "./reasoning.js";
+import type { IEventStore } from "./store.js";
+import { analyzeEvent, correlateWithCode, summarizeEvents, correlateChains } from "./reasoning.js";
 import { searchCode, getRecentCommits, createIssue } from "./github.js";
 import { getCodeScanningAlerts, correlateAlerts, formatAlertsForLLM, formatAlertTable } from "./codeql.js";
-import type { NormalizedEvent, RepoMapping } from "./types.js";
+import type { NormalizedEvent, RepoMapping, DetectedChain } from "./types.js";
 
 export interface AgentDeps {
-  eventStore: EventStore;
+  eventStore: IEventStore;
   repoMappings: RepoMapping[];
 }
 
@@ -96,34 +96,34 @@ async function routeMessage(
 ): Promise<void> {
   const lower = message.toLowerCase().trim();
 
-  // "what happened" / "events" / "status" → list recent events
+  // "what happened" / "events" / "status" \u2192 list recent events
   if (matchesIntent(lower, ["what happened", "events", "status", "show events", "recent", "overview"])) {
     await handleListEvents(token, res, deps);
     return;
   }
 
-  // "analyze <uuid>" → deep dive on specific event
+  // "analyze <uuid>" \u2192 deep dive on specific event
   const uuidMatch = lower.match(/analyze\s+([a-f0-9-]{8,})/);
   if (uuidMatch) {
     await handleAnalyzeEvent(uuidMatch[1], token, res, deps);
     return;
   }
 
-  // "correlate <uuid>" / "find the code for <uuid>" → code correlation
+  // "correlate <uuid>" / "find the code for <uuid>" \u2192 code correlation
   const correlateMatch = lower.match(/(?:correlate|find.*code.*for|investigate)\s+([a-f0-9-]{8,})/);
   if (correlateMatch) {
     await handleCorrelateEvent(correlateMatch[1], token, res, deps);
     return;
   }
 
-  // "create issue for <uuid>" → issue creation
+  // "create issue for <uuid>" \u2192 issue creation
   const issueMatch = lower.match(/(?:create|open|file)\s+(?:an?\s+)?issue\s+(?:for\s+)?([a-f0-9-]{8,})/);
   if (issueMatch) {
     await handleCreateIssueRequest(issueMatch[1], token, res, deps);
     return;
   }
 
-  // "codeql <repo>" / "code scanning" → show CodeQL alerts
+  // "codeql <repo>" / "code scanning" \u2192 show CodeQL alerts
   const codeqlMatch = lower.match(/(?:codeql|code\s*scanning)(?:\s+(?:for\s+)?([\w.-]+\/[\w.-]+))?/);
   if (codeqlMatch) {
     const repo = codeqlMatch[1] ?? inferRepoFromEvents(deps);
@@ -131,7 +131,20 @@ async function routeMessage(
     return;
   }
 
-  // "stats" → show statistics
+  // "chains" / "attack chains" / "correlations" \u2192 list detected chains
+  if (matchesIntent(lower, ["chains", "attack chain", "correlations", "kill chain"])) {
+    await handleListChains(token, res, deps);
+    return;
+  }
+
+  // "chain <id>" / "investigate chain <id>" \u2192 deep analysis of a chain
+  const chainMatch = lower.match(/(?:chain|investigate\s+chain)\s+([a-f0-9-]{8,})/);
+  if (chainMatch) {
+    await handleAnalyzeChain(chainMatch[1], token, res, deps);
+    return;
+  }
+
+  // "stats" \u2192 show statistics
   if (matchesIntent(lower, ["stats", "statistics", "summary", "dashboard"])) {
     await handleStats(token, res, deps);
     return;
@@ -143,7 +156,7 @@ async function routeMessage(
 
 /** List recent security events */
 async function handleListEvents(token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const events = deps.eventStore.list({ limit: 20 });
+  const events = await deps.eventStore.list({ limit: 20 });
 
   if (events.length === 0) {
     res.write(createTextEvent("No security events received yet. Jibril events will appear here once the shell reaction is configured and detections occur."));
@@ -151,20 +164,26 @@ async function handleListEvents(token: string, res: ServerResponse, deps: AgentD
     return;
   }
 
-  // Summarize via LLM
-  const summary = await summarizeEvents(events, token);
+  // Check for detected attack chains
+  const chains = await deps.eventStore.getChains();
+  if (chains.length > 0) {
+    res.write(createTextEvent(`\u26a0\ufe0f **${chains.length} attack chain(s) detected** \u2014 use \`chains\` to investigate\n\n`));
+  }
+
+  // Summarize via LLM (include chain context)
+  const summary = await summarizeEvents(events, token, chains.length > 0 ? chains : undefined);
   res.write(createTextEvent(summary));
 
   // Add event table
   const table = formatEventTable(events.slice(0, 10));
   res.write(createTextEvent("\n\n" + table));
-  res.write(createTextEvent("\n\nUse `analyze <event-uuid>` to deep dive into a specific event, or `correlate <event-uuid>` to find related code."));
+  res.write(createTextEvent("\n\nUse `analyze <event-uuid>` to deep dive into a specific event, `correlate <event-uuid>` to find related code, or `chains` to see detected attack chains."));
   res.write(createDoneEvent());
 }
 
 /** Deep dive analysis of a specific event */
 async function handleAnalyzeEvent(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found. Use \`events\` to see available events.`));
     res.write(createDoneEvent());
@@ -186,7 +205,7 @@ async function handleAnalyzeEvent(id: string, token: string, res: ServerResponse
 
 /** Correlate an event with source code */
 async function handleCorrelateEvent(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found.`));
     res.write(createDoneEvent());
@@ -247,7 +266,7 @@ async function handleCorrelateEvent(id: string, token: string, res: ServerRespon
 
 /** Ask user to confirm issue creation */
 async function handleCreateIssueRequest(id: string, _token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const event = deps.eventStore.get(id);
+  const event = await deps.eventStore.get(id);
   if (!event) {
     res.write(createTextEvent(`Event \`${id}\` not found.`));
     res.write(createDoneEvent());
@@ -265,7 +284,7 @@ async function handleCreateIssueRequest(id: string, _token: string, res: ServerR
     createConfirmationEvent({
       id: `create-issue-${id}`,
       title: "Create Security Issue",
-      message: `Create an issue in **${event.repo}** for:\n\n**${e.metadata.name}** (${e.score.severity_level}) — ${e.metadata.description}`,
+      message: `Create an issue in **${event.repo}** for:\n\n**${e.metadata.name}** (${e.score.severity_level}) \u2014 ${e.metadata.description}`,
       metadata: { eventId: id, repo: event.repo },
     }),
   );
@@ -287,7 +306,7 @@ async function handleConfirmation(
   }
 
   const eventId = confirmId.replace("create-issue-", "");
-  const event = deps.eventStore.get(eventId);
+  const event = await deps.eventStore.get(eventId);
   if (!event || !event.repo) {
     res.write(createTextEvent("Event no longer available."));
     res.write(createDoneEvent());
@@ -295,7 +314,7 @@ async function handleConfirmation(
   }
 
   const e = event.event;
-  const title = `[Jibril] ${e.metadata.name} — ${e.score.severity_level} severity`;
+  const title = `[Jibril] ${e.metadata.name} \u2014 ${e.score.severity_level} severity`;
   const body = buildIssueBody(event);
 
   const issue = await createIssue(token, event.repo, title, body);
@@ -303,9 +322,61 @@ async function handleConfirmation(
   res.write(createDoneEvent());
 }
 
+/** List detected attack chains */
+async function handleListChains(token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
+  const chains = await deps.eventStore.getChains();
+
+  if (chains.length === 0) {
+    res.write(createTextEvent("No attack chains detected yet. Chains are detected when multiple events from the same container/host match a known attack pattern (e.g., credential theft \u2192 privilege escalation \u2192 persistence).\n\nKeep monitoring \u2014 chains will appear as more events are correlated."));
+    res.write(createDoneEvent());
+    return;
+  }
+
+  const table = formatChainTable(chains);
+  res.write(createTextEvent(`## Detected Attack Chains\n\n${table}`));
+
+  // Summarize with LLM
+  const chainSummary = chains.map(c => {
+    const steps = c.matchedEvents.map(e => `${e.event.metadata.tactic} (${e.event.metadata.kind})`).join(" \u2192 ");
+    return `- **${c.pattern.name}** [${(c.confidence * 100).toFixed(0)}%]: ${steps} | scope: ${c.scope} | status: ${c.status}`;
+  }).join("\n");
+
+  res.write(createTextEvent(`\n\n${chainSummary}`));
+  res.write(createTextEvent(`\n\nUse \`chain <chain-id>\` to investigate a specific attack chain in detail.`));
+  res.write(createDoneEvent());
+}
+
+/** Deep analysis of a specific attack chain */
+async function handleAnalyzeChain(id: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
+  // Search by full ID or prefix
+  const chain = await deps.eventStore.getChain(id) ??
+    (await deps.eventStore.getChains()).find(c => c.id.startsWith(id));
+
+  if (!chain) {
+    res.write(createTextEvent(`Chain \`${id}\` not found. Use \`chains\` to see detected attack chains.`));
+    res.write(createDoneEvent());
+    return;
+  }
+
+  res.write(createTextEvent("Analyzing attack chain...\n\n"));
+
+  const analysis = await correlateChains(chain, token);
+  res.write(createTextEvent(analysis));
+
+  // Show event timeline
+  const timeline = chain.matchedEvents.map((e, i) => {
+    const ev = e.event;
+    return `${i + 1}. **${ev.metadata.tactic}** \u2014 ${ev.metadata.name} (\`${e.id.slice(0, 8)}\`) | ${ev.score.severity_level} | ${ev.timestamp}`;
+  }).join("\n");
+
+  res.write(createTextEvent(`\n\n### Event Timeline\n${timeline}`));
+  res.write(createDoneEvent());
+}
+
 /** Show event statistics */
 async function handleStats(_token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const stats = deps.eventStore.stats();
+  const stats = await deps.eventStore.stats();
+  const chainStats = await deps.eventStore.correlationStats();
 
   if (stats.total === 0) {
     res.write(createTextEvent("No events have been received yet."));
@@ -324,32 +395,50 @@ async function handleStats(_token: string, res: ServerResponse, deps: AgentDeps)
     ...Object.entries(stats.byType).map(([k, v]) => `- **${k}**: ${v}`),
   ];
 
+  if (chainStats.totalChains > 0) {
+    lines.push(
+      "",
+      "### Attack Chains",
+      `**Detected chains**: ${chainStats.totalChains}`,
+      `**Active correlation groups**: ${chainStats.activeGroups}`,
+      ...Object.entries(chainStats.byPattern).map(([k, v]) => `- **${k}**: ${v}`),
+    );
+  }
+
   res.write(createTextEvent(lines.join("\n")));
   res.write(createDoneEvent());
 }
 
-/** Handle general query — analyze the latest high-severity event */
+/** Handle general query \u2014 analyze the latest high-severity event */
 async function handleGeneralQuery(message: string, token: string, res: ServerResponse, deps: AgentDeps): Promise<void> {
-  const events = deps.eventStore.list({ limit: 5, severity: "critical" });
-  const fallback = events.length > 0 ? events : deps.eventStore.list({ limit: 5 });
+  const events = await deps.eventStore.list({ limit: 5, severity: "critical" });
+  const fallback = events.length > 0 ? events : await deps.eventStore.list({ limit: 5 });
 
   if (fallback.length === 0) {
     res.write(createTextEvent(
       "No security events have been received yet.\n\n" +
       "**Available commands:**\n" +
-      "- `events` — List recent security events\n" +
-      "- `analyze <uuid>` — Deep dive into a specific event\n" +
-      "- `correlate <uuid>` — Find related source code\n" +
-      "- `create issue for <uuid>` — File a GitHub issue\n" +
-      "- `stats` — Show event statistics",
+      "- `events` \u2014 List recent security events\n" +
+      "- `analyze <uuid>` \u2014 Deep dive into a specific event\n" +
+      "- `correlate <uuid>` \u2014 Find related source code\n" +
+      "- `create issue for <uuid>` \u2014 File a GitHub issue\n" +
+      "- `chains` \u2014 List detected attack chains\n" +
+      "- `stats` \u2014 Show event statistics",
     ));
     res.write(createDoneEvent());
     return;
   }
 
+  // Include chain context if any
+  const chains = await deps.eventStore.getChains();
+  let chainContext = "";
+  if (chains.length > 0) {
+    chainContext = `\n\nDetected attack chains: ${chains.map(c => `${c.pattern.name} (${(c.confidence * 100).toFixed(0)}%)`).join(", ")}`;
+  }
+
   // Analyze with user's question as context
   const latest = fallback[0];
-  const result = await analyzeEvent(latest, token, `User question: ${message}`);
+  const result = await analyzeEvent(latest, token, `User question: ${message}${chainContext}`);
   res.write(createTextEvent(result.analysis));
   res.write(createDoneEvent());
 }
@@ -382,11 +471,11 @@ async function handleCodeQLAlerts(
   res.write(createTextEvent(formatAlertTable(alerts)));
 
   // Cross-reference with runtime events
-  const events = deps.eventStore.list({ limit: 50 });
+  const events = await deps.eventStore.list({ limit: 50 });
   const repoEvents = events.filter(e => e.repo === repo);
 
   if (repoEvents.length > 0) {
-    res.write(createTextEvent("\n\n### Runtime ↔ Static Correlation\n\n"));
+    res.write(createTextEvent("\n\n### Runtime \u2194 Static Correlation\n\n"));
 
     let totalCorrelations = 0;
     for (const event of repoEvents.slice(0, 10)) {
@@ -395,7 +484,7 @@ async function handleCodeQLAlerts(
         totalCorrelations += correlations.length;
         const e = event.event;
         res.write(createTextEvent(
-          `**${e.metadata.name}** (${e.score.severity_level}) ↔ ` +
+          `**${e.metadata.name}** (${e.score.severity_level}) \u2194 ` +
           correlations.map(c => `\`${c.alert.rule.id}\` (${c.matchReason})`).join(", ") +
           "\n",
         ));
@@ -405,7 +494,7 @@ async function handleCodeQLAlerts(
     if (totalCorrelations === 0) {
       res.write(createTextEvent("No direct correlations found between runtime events and CodeQL alerts for this repo.\n"));
     } else {
-      res.write(createTextEvent(`\n**${totalCorrelations}** correlation(s) found — these CodeQL alerts may explain the runtime behavior.\n`));
+      res.write(createTextEvent(`\n**${totalCorrelations}** correlation(s) found \u2014 these CodeQL alerts may explain the runtime behavior.\n`));
     }
   }
 
@@ -428,8 +517,13 @@ async function handleCodeQLAlerts(
 
 /** Infer a repo from existing events */
 function inferRepoFromEvents(deps: AgentDeps): string | undefined {
-  const events = deps.eventStore.list({ limit: 10 });
-  return events.find(e => e.repo)?.repo;
+  // Best-effort, synchronous inference based on configured repo mappings.
+  // For Cosmos / remote modes this may still return undefined.
+  const mappings = deps.repoMappings;
+  if (!mappings || mappings.length === 0) {
+    return undefined;
+  }
+  return mappings[0].repo;
 }
 
 /** Format events as a markdown table */
@@ -476,14 +570,14 @@ function buildIssueBody(event: NormalizedEvent): string {
     if (e.network.domain) sections.push(`- **Domain**: ${e.network.domain}`);
   }
   if (e.base?.background?.ancestry?.length) {
-    const chain = e.base.background.ancestry.map(a => `\`${a.cmd}\``).join(" → ");
+    const chain = e.base.background.ancestry.map(a => `\`${a.cmd}\``).join(" \u2192 ");
     sections.push("", "### Process Ancestry", chain);
   }
 
   sections.push(
     "",
     "---",
-    "*Reported by [Jibril Correlation Agent](https://github.com) — Runtime→Code security correlation powered by Jibril eBPF*",
+    "*Reported by [Jibril Correlation Agent](https://github.com) \u2014 Runtime\u2192Code security correlation powered by Jibril eBPF*",
   );
 
   return sections.join("\n");
@@ -491,4 +585,18 @@ function buildIssueBody(event: NormalizedEvent): string {
 
 function matchesIntent(input: string, patterns: string[]): boolean {
   return patterns.some(p => input.includes(p));
+}
+
+/** Format chains as a markdown table */
+function formatChainTable(chains: DetectedChain[]): string {
+  const rows = chains.map(c => {
+    const steps = c.matchedEvents.map(e => e.event.metadata.tactic).join(" \u2192 ");
+    return `| \`${c.id.slice(0, 8)}\` | ${c.pattern.name} | ${(c.confidence * 100).toFixed(0)}% | ${steps} | ${c.scope} | ${c.status} |`;
+  });
+
+  return [
+    "| ID | Pattern | Confidence | Kill Chain | Scope | Status |",
+    "|-----|---------|------------|------------|-------|--------|",
+    ...rows,
+  ].join("\n");
 }

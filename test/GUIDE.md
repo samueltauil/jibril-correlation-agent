@@ -599,3 +599,43 @@ After testing locally with sample events:
 4. **Use** `@jibril` in Copilot Chat to investigate security events
 
 The agent bridges the gap between *"something suspicious happened at runtime"* and *"here's the exact code and commit responsible, with a fix."*
+
+---
+
+## Part 9: Testing with Cosmos DB
+
+The agent supports two storage modes. By default (no `COSMOS_ENDPOINT` set), it uses in-memory storage. When `COSMOS_ENDPOINT` is set, it persists events, chains, and correlation state to Azure Cosmos DB.
+
+### In-Memory Mode (Default)
+
+No additional setup needed — just run `npm run dev`. All state is lost when the agent restarts. This is ideal for local development and testing.
+
+### Testing with Cosmos DB
+
+To test persistence across restarts:
+
+1. Set up a Cosmos DB account (serverless, free tier) or use the [Azure Cosmos DB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/emulator)
+2. Authenticate via `az login` (the agent uses `DefaultAzureCredential` — no keys needed)
+3. Start the agent with Cosmos config:
+
+```bash
+export COSMOS_ENDPOINT="https://your-account.documents.azure.com:443/"
+export COSMOS_DATABASE="jibril"
+npm run dev
+```
+
+4. Send sample events, then restart the agent and verify state persists:
+
+```bash
+# Send events
+bash test/send-events.sh
+
+# Check events exist
+curl -s http://localhost:3000/health | jq .
+
+# Restart the agent (Ctrl+C, then npm run dev)
+# Check events still exist
+curl -s http://localhost:3000/health | jq .
+```
+
+The database and containers are created automatically on first startup.

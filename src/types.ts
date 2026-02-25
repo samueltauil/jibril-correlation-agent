@@ -111,4 +111,44 @@ export interface AgentConfig {
   port: number;
   webhookSecret?: string;
   repoMappings: RepoMapping[];
+  alertRepo?: string;
+  githubAppId?: string;
+  githubAppPrivateKey?: string;
+}
+
+// --- Correlation Engine Types ---
+
+/** A single step in an attack chain pattern */
+export interface ChainStep {
+  tactic: string;                 // MITRE ATT&CK tactic (e.g., "credential_access")
+  kind?: string;                  // Optional: specific Jibril event kind filter
+  technique?: string;             // Optional: specific MITRE technique filter
+}
+
+/** A predefined attack chain pattern to detect */
+export interface AttackChainPattern {
+  id: string;                     // Unique pattern identifier
+  name: string;                   // Human-readable name
+  description: string;            // What this attack chain represents
+  steps: ChainStep[];             // Ordered tactic sequence
+}
+
+/** A detected attack chain instance */
+export interface DetectedChain {
+  id: string;                     // Unique chain instance ID
+  pattern: AttackChainPattern;    // The pattern that matched
+  matchedEvents: NormalizedEvent[];// Events that matched (ordered by time)
+  confidence: number;             // 0.0-1.0 overall confidence
+  firstSeen: number;              // Timestamp of first matched event
+  lastSeen: number;               // Timestamp of last matched event
+  scope: string;                  // container_id, container_name, or host
+  status: "open" | "escalated";   // Whether an alert has been created
+}
+
+/** A group of events from the same scope (container/host) */
+export interface CorrelationGroup {
+  key: string;                    // Grouping key (container_id | container_name | host)
+  events: NormalizedEvent[];      // Events in this group
+  chains: DetectedChain[];        // Detected chains for this group
+  lastUpdated: number;            // Last event timestamp
 }
