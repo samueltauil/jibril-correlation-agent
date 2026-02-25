@@ -98,6 +98,24 @@ reactions:
 
 See [`jibril/forward-to-agent.yaml`](jibril/forward-to-agent.yaml) for the complete working alchemy, and the [`test/`](test/) directory for an end-to-end walkthrough with sample events.
 
+## Testing with the Demo Target App
+
+The [**jibril-demo-target**](https://github.com/samueltauil/jibril-demo-target) repository provides a deliberately vulnerable application you can deploy alongside Jibril to generate real security events for this agent.
+
+### Quick start
+
+1. **Clone the demo target**:
+   ```bash
+   git clone https://github.com/samueltauil/jibril-demo-target.git
+   cd jibril-demo-target
+   ```
+2. **Run it** (Docker or directly) — see its README for full instructions.
+3. **Trigger attack scenarios** — the demo app exposes endpoints that simulate credential access, crypto miner execution, dynamic linker attacks, and more.
+4. **Jibril detects** the runtime behavior and forwards events to the correlation agent via the shell reaction in [`jibril/forward-to-agent.yaml`](jibril/forward-to-agent.yaml).
+5. **Ask `@jibril`** in Copilot Chat to analyze, correlate, and create issues for the detected events.
+
+This is the recommended way to see the full end-to-end flow without manually crafting event payloads.
+
 ## Project Structure
 
 ```
@@ -127,6 +145,7 @@ test/
   send-events.sh        — Script to send sample events to the agent
 .github/workflows/
   deploy.yml            — CI/CD: build, push to GHCR, deploy to Azure
+  release.yml           — Release: build & push versioned image on GitHub release
 Dockerfile              — Production container image
 ```
 
@@ -144,7 +163,9 @@ docker run -p 3000:3000 \
 
 Available tags:
 - `latest` — latest build from main
-- `0.1.0` — pinned version
+- `x.y.z` — pinned semver release (e.g., `0.1.0`)
+- `x.y` — minor release track (e.g., `0.1`)
+- `x` — major release track (e.g., `0`)
 
 ### Build From Source
 
@@ -186,8 +207,14 @@ az deployment group create \
 
 Authentication uses managed identity via `DefaultAzureCredential` — no Cosmos keys needed.
 
-**CI/CD**: The included GitHub Actions workflow (`.github/workflows/deploy.yml`) builds the Docker image, pushes to GHCR, and deploys to Azure on every push to `main`. Configure these repository secrets:
-- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (federated identity)
+**CI/CD**: Two GitHub Actions workflows are included:
+- **[`deploy.yml`](.github/workflows/deploy.yml)** — On every push to `main`: builds the image, pushes to GHCR, and deploys to Azure Container Apps.
+- **[`release.yml`](.github/workflows/release.yml)** — On GitHub release publish: builds and pushes semver-tagged images (`x.y.z`, `x.y`, `x`, `latest`) to GHCR.
+
+To create a release: go to **Releases → Draft a new release**, create a semver tag (e.g., `v0.2.0`), and publish. The release workflow will automatically build and push the versioned image.
+
+Configure these repository secrets:
+- `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` (federated identity, for deploy)
 - `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `WEBHOOK_SECRET`
 
 **Storage modes**:
