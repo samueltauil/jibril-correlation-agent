@@ -82,7 +82,7 @@ export const ATTACK_CHAIN_PATTERNS: AttackChainPattern[] = [
   },
 ];
 
-export type AlertCallback = (chain: DetectedChain) => void;
+export type AlertCallback = (chain: DetectedChain) => void | Promise<void>;
 
 export class CorrelationEngine {
   private groups = new Map<string, CorrelationGroup>();
@@ -128,7 +128,7 @@ export class CorrelationEngine {
       for (const chain of chains) {
         const dedupeKey = `${chain.pattern.id}:${chain.scope}`;
         const exists = this.cosmos
-          ? (await this.cosmos.getChain(chain.id)) !== undefined
+          ? (await this.cosmos.getChain(dedupeKey)) !== undefined
           : this.detectedChains.has(dedupeKey);
 
         if (!exists) {
@@ -159,7 +159,7 @@ export class CorrelationEngine {
   }): DetectedChain[] {
     let chains = Array.from(this.detectedChains.values());
 
-    if (options?.minConfidence) {
+    if (options?.minConfidence != null) {
       chains = chains.filter(c => c.confidence >= options.minConfidence!);
     }
     if (options?.pattern) {
@@ -231,8 +231,17 @@ export class CorrelationEngine {
     pattern: AttackChainPattern,
     group: CorrelationGroup,
   ): DetectedChain | null {
+    // Only consider events within the configured correlation window
+    const cutoff = Date.now() - this.windowMs;
+    const windowedEvents = group.events.filter(
+      (event) => event.receivedAt >= cutoff,
+    );
+    if (windowedEvents.length === 0) {
+      return null;
+    }
+
     // Sort events by time
-    const sorted = [...group.events].sort((a, b) => a.receivedAt - b.receivedAt);
+    const sorted = [...windowedEvents].sort((a, b) => a.receivedAt - b.receivedAt);
 
     const matched: NormalizedEvent[] = [];
     let searchFrom = 0;
@@ -367,8 +376,13 @@ export class CorrelationEngine {
       this.alertHistory.set(throttleKey, Date.now());
     }
 
+    // Invoke the alert callback and only mark as escalated if it completes successfully.
+    const result = this.alertCallback(chain);
+    if (result && typeof (result as Promise<unknown>).then === "function") {
+      await result;
+    }
+
     chain.status = "escalated";
-    this.alertCallback(chain);
   }
 
   /** Clean up old groups outside the time window */

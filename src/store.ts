@@ -1,6 +1,6 @@
 import type { JibrilEvent, NormalizedEvent, EventType, RepoMapping, DetectedChain } from "./types.js";
 import type { CosmosStore } from "./cosmos.js";
-import { CorrelationEngine, type AlertCallback, ATTACK_CHAIN_PATTERNS } from "./correlation.js";
+import { CorrelationEngine, type AlertCallback } from "./correlation.js";
 
 /** Async storage interface for events and correlation state */
 export interface IEventStore {

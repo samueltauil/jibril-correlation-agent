@@ -517,9 +517,13 @@ async function handleCodeQLAlerts(
 
 /** Infer a repo from existing events */
 function inferRepoFromEvents(deps: AgentDeps): string | undefined {
-  // Note: this is sync — for Cosmos mode it only returns undefined
-  // The codeql handler passes repo explicitly in most cases
-  return undefined;
+  // Best-effort, synchronous inference based on configured repo mappings.
+  // For Cosmos / remote modes this may still return undefined.
+  const mappings = deps.repoMappings;
+  if (!mappings || mappings.length === 0) {
+    return undefined;
+  }
+  return mappings[0].repo;
 }
 
 /** Format events as a markdown table */
